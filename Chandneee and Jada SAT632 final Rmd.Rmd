@@ -1,0 +1,182 @@
+---
+title: "STAT632 Final Project. Wine Quality"
+author: "Chandnee & Jada"
+date: "3/10/2022"
+output: pdf_document
+---
+
+```{r}
+#Libraries that will be used in the project.
+library(tidyverse)
+library(performance)
+library(see)
+library(patchwork)
+library(MASS)
+library(rpart)
+```
+
+```{r}
+# Loading in the data, and ensuring we have the right data set.
+vino <- read.csv("wine-quality-white-and-red.csv")
+head(vino)
+```
+
+```{r}
+# Confirming the dimensions of the data set.
+  dim(vino)
+  table(vino$type)
+```
+
+```{r}
+vino_white <- vino %>%
+  filter(type == "white") %>%
+  drop_na()
+```
+
+## To better analyze, we will work onlye with the white wine data from the set.
+## We have 4898 rows (Wines) by 13 columns(Aspects).
+```{r}
+dim(vino_white)
+```
+
+```{r}
+View(vino_white)
+```
+
+
+```{r}
+ggplot(vino_white, aes(x=alcohol, y=quality)) +
+  geom_point()
+
+ggplot(vino_white, aes(x=alcohol, y=factor(quality))) +
+  geom_boxplot()
+
+ggplot(vino_white, aes(x=volatile.acidity, y=quality)) +
+  geom_point()
+
+ggplot(vino_white, aes(x=volatile.acidity, y=factor(quality))) +
+  geom_boxplot()
+```
+# Analysis
+```{r}
+# We will look at quality as a response variable to all of our predictor values.
+lm_1 <- lm(quality ~ fixed.acidity + volatile.acidity + citric.acid
+           + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide
+           + density + pH + sulphates+alcohol,
+           data = vino_white)
+summary(lm_1)
+```
+## From summary of full model(lm_1), we get 8 predictor(fixed.acidity,volatile acidity,residual sugar,free.sulphur.dioxide,density,pH,sulphates,alcohol) which have most significant effect on the model. After that we will verify by using AIC.
+
+
+
+```{r}
+## For variable selection we are using AIC method here
+step(lm_1)
+
+```
+## After using AIC, we can see that the last step of lm formula make with 8 same significant predictor like our summary method of lm_1.
+
+```{r}
+# fitting multiple linear regression by removing not significant predictor
+lm_2 <- lm (quality ~ fixed.acidity + volatile.acidity + residual.sugar +free.sulfur.dioxide + density + pH + sulphates + alcohol, data = vino_white)
+
+summary(lm_2)
+
+```
+## After removing some predictors, we can see from the reduced model(lm_2),all of the predictor has significant impact.
+```{r}
+# partial f test 
+anova(lm_2, lm_1)
+
+```
+## From partial f test, we see that full model(lm1) p value is 0.7405>.01, so we fail to reject null hypothesis, and we can say that we can remove some predictors variable from full model to get better result.
+
+```{r}
+# After removing some predictor we see the correlation betwen remaining variables
+pairs(quality ~ fixed.acidity + volatile.acidity + residual.sugar + 
+    free.sulfur.dioxide + density + pH + sulphates + alcohol, data=vino_white)
+```
+
+
+```{r}
+library(rpart)
+t1 <- rpart(quality ~ ., data = vino_white)
+```
+
+```{r}
+par(cex=0.7, xpd=NA)
+plot(t1)
+text(t1, use.n = TRUE)
+```
+## From tree model,Alcohol, Volatile acidity, density, free sulfur dioxide most impactful predictor in determining wine quality.
+
+```{r}
+par(mfrow=c(1,2), mar=c(4.5, 4.5, 2, 2))
+plot(predict(lm_2), rstandard(lm_2),xlab="Fitted Values", ylab="Standardized Residuals")
+abline(h=0)
+qqnorm(resid(lm_2))
+qqline(resid(lm_2))
+hist(resid(lm_2))
+```
+## Standarized vs residual plot shows nonnormality due to nonconstant varience.From QQ plot we can see that normality of multiple linear regression not satisfied. Also from histogram of lm_2 looks like right skewed. We will do log transformation to get the normality
+
+```{r}
+library('performance')
+library('see')
+library('patchwork')
+performance::check_model(lm_2)
+```
+```{r}
+s1 <- summary(lm_1)
+s2 <- summary(lm_2)
+s1$adj.r.squared
+s2$adj.r.squared
+```
+
+
+
+
+Adj. R-squared for lm_1:  0.2804
+Adj. R-squared for lm_2:  0.2806
+The Adj. R-squared only differs by a fourth decimal place. thus we see removing citric.acid and total.sulfur.dioxide do not impact our model.
+
+
+
+
+
+```{r}
+# Fitting model using log transformation
+lm_3<-lm(log(quality) ~ log(fixed.acidity) + log(volatile.acidity) +log( residual.sugar) + log(
+    free.sulfur.dioxide) + log(density) +log(pH) + log(sulphates) + log(alcohol),
+                                                                         
+     data=vino_white)
+summary(lm_3)
+```
+
+
+```{r}
+par(mfrow=c(1,2), mar=c(4.5, 4.5, 2, 2))
+plot(predict(lm_2), rstandard(lm_2),xlab="Fitted Values", ylab="Standardized Residuals")
+abline(h=0)
+qqnorm(resid(lm_3))
+qqline(resid(lm_3))
+hist(resid(lm_3))
+```
+## After doing log transformation, we can see that histogram shows normal distribution but standardized vs residual plot still shows nonconstant varience and qq plot shows still some outliers.
+```{r}
+# Plot leverage
+plot(hatvalues(lm_3), rstandard(lm_3),
+xlab='Leverage', ylab='Standardized Residuals', xlim=c(0,0.35))
+p<- 8
+n<- nrow(vino_white)
+abline(v = 2*(p+1)/n, lty=2)
+abline(h = c(-4,4), lty=2)
+```
+```{r}
+ind <- which(hatvalues(lm_3) > 0.01 & abs(rstandard(lm_3)) > 4)
+vino_white[ind, ]
+```
+## fixed.acidity,volatile.acidity.citric acid has outliers.
+
+
