@@ -1,0 +1,293 @@
+---
+title: "Final"
+output: html_document
+---
+
+
+```{r, warning=False}
+library(pacman)
+pacman::p_load(tidyverse,performance, glmnet, car, MASS)
+```
+
+```{r}
+vino <- read.csv("wine-quality-white-and-red.csv")
+glimpse(vino)
+```
+
+## To better analyze, we will work only with the white wine data from the set.
+```{r}
+# remove some variable to clean the data. Since free sulfur.dioxide and total.sulfur.dioxide has same meaning and type is not needed.
+vino_w <- vino %>%
+  filter(type == "white") %>%
+  dplyr::select(-type, -free.sulfur.dioxide) %>%
+  drop_na()
+```
+
+## We have 4898 rows (Wines) by 11 columns(Aspects).
+```{r}
+dim(vino_w)
+view(vino_w)
+```
+
+```{r}
+#fit multiple linear regression model
+lm1 <- lm(quality ~ ., data=vino_w)
+summary(lm1)
+```
+## From summary of full model(lm1), we get 7 predictor(fixed.acidity, volatile acidity, residual sugar, density, pH, sulphates, alcohol) which have most significant effect on the model. We will verify by using AIC.
+
+```{r}
+# for variable selection we use AIC
+step(lm1)
+```
+## After using AIC, we can see that we have 7 significant predictors, like in our summary method of lm1.
+
+```{r}
+# fitting multiple linear regression by removing not significant predictor
+lm2 <- lm(quality ~ fixed.acidity + volatile.acidity 
+      + residual.sugar + density + pH + sulphates + alcohol, 
+    data = vino_w)
+
+summary(lm2)
+```
+## After removing the insignifigant predictors, we can see we now have all signifigant predictors in our model (lm2).
+
+```{r}
+# partial f test 
+anova(lm2, lm1)
+```
+## From partial f test, we see that full model(lm1) p value is 0.89>.01, so we fail to reject null hypothesis, we can say that we can remove some predictor variable from full model to get better result.
+
+```{r}
+pairs(quality ~ fixed.acidity + volatile.acidity + residual.sugar + 
+     + density + pH + sulphates + alcohol, data=vino_w)
+```
+## Since the data set is considered large, so we cannot analyze the data as needed. The scatterplot matrix is too jumbled together, thus we will explore other visualizations to better analyze the data.
+
+```{r}
+library(rpart)
+t1 <- rpart(quality ~ fixed.acidity + volatile.acidity + residual.sugar + 
+     + density + pH + sulphates + alcohol, data = vino_w)
+```
+## Regression tree model to more closely analyze the the data.
+
+```{r}
+# Regression tree to analyze data with a different visualization
+par(cex=0.7, xpd=NA)
+plot(t1)
+text(t1, use.n = TRUE)
+```
+## From tree model, Alcohol, Volatile acidity, density most impactful predictor in determining wine quality.Now, we will looking at the most impactful variables as defined by our regression tree, with quality as the response. We are looking for linearity in the models.
+
+```{r}
+t1 <- rpart(quality ~ alcohol, data = vino_w)
+
+par(cex=0.7, xpd=NA)
+plot(t1)
+text(t1, use.n = TRUE)
+```
+
+```{r}
+t1 <- rpart(quality ~ volatile.acidity, data = vino_w)
+
+par(cex=0.7, xpd=NA)
+plot(t1)
+text(t1, use.n = TRUE)
+```
+
+```{r}
+t1 <- rpart(quality ~ density, data = vino_w)
+
+par(cex=0.7, xpd=NA)
+plot(t1)
+text(t1, use.n = TRUE)
+```
+
+## For removing some more variables, we use the Lasso method.
+```{r}
+x <- model.matrix(quality ~ fixed.acidity + volatile.acidity + residual.sugar + 
+     + density + pH + sulphates + alcohol, data=vino_w)[, -1]
+y <- vino_w$quality
+lasso <- glmnet(x, y, alpha=1)
+
+set.seed(9)
+lasso_cv <- cv.glmnet(x, y, alpha=1)
+lasso_cv$lambda.1se # selected lambda value
+```
+## lambda value .012 for 1 standard error.
+
+```{r}
+plot(lasso, xvar = "lambda")
+abline(v=log(lasso_cv$lambda.1se))
+```
+## From this plot, we can see that lambda makes all variable coefficient approach 0. From this, we will also remove citric.acid.
+
+```{r}
+coef(lasso_cv, s="lambda.1se")
+```
+## citric.acid is removed. Next, we will make the model again without citric.acid.
+
+```{r}
+lm3<-lm(quality ~ fixed.acidity + volatile.acidity + residual.sugar + 
+     + density + pH + sulphates + alcohol, data=vino_w)
+summary(lm3)
+anova(lm3, lm1)
+```
+## since p value < .01. and we can reject null hypothesis.that means at least one of the predictor has significant impact.
+
+```{r}
+AIC(lm1)
+AIC(lm2)
+AIC(lm3)
+```
+## Since AIC is lower for the reduced models when using the step function. We can choose lm2 or lm3. We will choose lm3 since it has the least amount of varibles.
+
+```{r}
+# Residual Vs. Fitted and Histogram
+par(mfrow=c(1,2), mar=c(4.5, 4.5, 2, 2))
+plot(predict(lm3), rstandard(lm3),xlab="Fitted Values", ylab="Standardized Residuals")
+abline(h=0)
+qqnorm(rstandard(lm2))
+qqline(rstandard(lm2))
+hist(resid(lm2))
+```
+## Standarized vs residual plot shows nonnormality due to nonconstant varience. From QQ plot we can see that normality of multiple linear regression not satisfied. Also the histogram of lm3 looks like right skewed.
+
+
+
+```{r}
+# Plot leverage
+plot(hatvalues(lm2), rstandard(lm2),
+xlab='Leverage', ylab='Standardized Residuals')
+p<- 8
+n<- nrow(vino_w)
+abline(v = 2*(p+1)/n, lty=2)
+abline(h = c(-4,4), lty=2)
+```
+
+```{r}
+# Taking out values above quality rating 4.
+ind <- which(hatvalues(lm2) > 0.01 & abs(rstandard(lm2)) > 4)
+vino_w[ind, ]
+```
+## identify leverage points. Then we clean outlier for getting better model.
+
+```{r}
+# Remove outlier
+vino_clean <- vino_w[-ind,]
+```
+
+```{r}
+# make plot after removing outlier
+lm4 <- lm(quality ~ fixed.acidity + volatile.acidity + residual.sugar + total.sulfur.dioxide +
+       density + pH + sulphates + alcohol,data=vino_clean)
+summary(lm4)
+AIC(lm4)
+```
+## After removing the outliers and making pplot, we now only have significant preditor variables.
+
+
+
+```{r}
+# residuals versus predictors with marginal plots
+#par(mfrow=c(4,2), mar=c(1, 1, 1, 1))
+library(ggExtra)
+g <- ggplot(vino_clean, aes(fixed.acidity, rstandard(lm4))) + geom_point() + xlab("Fixed Acidity") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+g <- ggplot(vino_clean, aes(volatile.acidity, rstandard(lm4))) + geom_point() + xlab("Volatile Acidity") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+
+g <- ggplot(vino_clean, aes(residual.sugar, rstandard(lm4))) + geom_point() + xlab("Residual Sugar") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+
+g <- ggplot(vino_clean, aes(total.sulfur.dioxide, rstandard(lm4))) + geom_point() + xlab("Total Sulfur dioxide") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+
+
+g <- ggplot(vino_clean, aes(density, rstandard(lm4))) + geom_point() + xlab("Density") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+
+g <- ggplot(vino_clean, aes(pH, rstandard(lm4))) + geom_point() + xlab("PH") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+
+g <- ggplot(vino_clean, aes(sulphates, rstandard(lm4))) + geom_point() + xlab("Sulphates") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+
+g <- ggplot(vino_clean, aes(alcohol, rstandard(lm4))) + geom_point() + xlab("Alcohol") + ylab("Standardized Residuals")
+ggMarginal(g,type="histogram",fill="transparent")
+```
+
+
+
+
+## from marginal histogram plot, we can see volatile acidity and sulphates variables are looking right skewed,so we make new model after doing logtransformation of volatile.acidity and sulphates.
+
+
+
+
+```{r}
+lm5 <- lm(quality ~ fixed.acidity + log(volatile.acidity) + residual.sugar + 
+    total.sulfur.dioxide + density + pH + log(sulphates) +log (alcohol),data=vino_clean)
+
+plot(lm5)
+abline(lm5)
+qqnorm(rstandard(lm5))
+qqline(rstandard(lm5))
+hist(resid(lm5))
+
+summary(lm5)
+AIC(lm5)
+```
+## After doing log transformation, we got better qq plot and variance are being constant than previous model.
+
+
+
+
+```{r}
+# Boxcox transformation
+boxcox(lm5, lambda=seq(0.6, 0.95, by=0.05))
+summary(powerTransform(lm5))
+```
+## we did boxcox for getting mormality in our model.we got our lambda minimum 0.7. Then using 0.7 we make new model.
+
+```{r}
+lm6 <- lm(quality^0.7 ~  fixed.acidity + log(volatile.acidity) + residual.sugar + total.sulfur.dioxide + density + pH + log(sulphates) +log (alcohol),data=vino_clean)
+summary(lm6)
+AIC(lm6)
+```
+## From the summary of the model lm5, we have a p value < 0.01, so we reject null hypothesis.
+ About 28.4% variability  in quality is explained by our predictors.
+
+The interpretation of the coefficients are as follows for each predictor:
+fixed.acidity: Holding all other predictor constant,on average we expect quality to increase by 5.195e-02 g / dm^3 for everyday increase in fixed.acidity.
+
+volatile.acidity: Holding all other predictor constant,on average we expect log(quality) to increase by 2.534e-01 g / dm^3 for everyday decrease in log(volatile.acidity).
+
+residual.sugar: Holding all other predictor constant,on average we expect quality to increase by 4.853e-02 g / dm^3 for everyday increase in residual.sugar.
+
+density: Holding all other predictor constant,on average we expect quality to increase by 1.04e+02 g / dm^3 for everyday decrease in density.
+
+sulphates: Holding all other predictor constant,on average we expect log(quality) to increase by 1.593e-01 g / dm^3 for everyday decrease in log(sulphates).
+alcohol:Holding all other predictor constant,on average we expect log(quality) to increase by 3.428e-01 g / dm^3 for everyday decrease in log(alcohol).
+
+
+
+```{r}
+# Check assumptions
+par(mfrow=c(1,2), mar=c(4.5, 4.5, 2, 2))
+plot(predict(lm5), rstandard(lm5),xlab="Fitted Values", ylab="Standardized Residuals")
+abline(h=0)
+qqnorm(rstandard(lm6))
+qqline(rstandard(lm6))
+hist(rstandard(lm6))
+```
+## after doing boxcox we get normality on our histogram plot which is much better than previous model without transformation.
+
+
+
+```{r}
+library('performance')
+library('see')
+library('patchwork')
+performance::check_model(lm6)
+```
